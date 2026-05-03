@@ -1,0 +1,150 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:smartphone_recorder/core/app_theme.dart';
+import 'package:smartphone_recorder/presentation/providers/recording_provider.dart';
+
+class HomeScreen extends ConsumerWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recordingState = ref.watch(recordingProvider);
+    final recordingNotifier = ref.read(recordingProvider.notifier);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('SMARTPHONE RECORDER'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Top Section - Status or Visual
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryNavy.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppTheme.glassWhite),
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    recordingState.status == RecordingStatus.recording 
+                        ? Icons.stop_circle_outlined 
+                        : Icons.videocam_outlined,
+                    size: 80,
+                    color: recordingState.status == RecordingStatus.recording 
+                        ? Colors.red 
+                        : AppTheme.accentOrange,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    recordingState.status == RecordingStatus.failure
+                        ? '오류 발생: ${recordingState.errorMessage}'
+                        : (recordingState.status == RecordingStatus.recording 
+                            ? '녹화 중... (${_formatDuration(recordingState.duration)})' 
+                            : '녹화 준비 완료'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: recordingState.status == RecordingStatus.failure ? Colors.red : Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    recordingState.status == RecordingStatus.recording 
+                        ? '플로팅 버튼으로 제어할 수 있습니다'
+                        : '버튼을 눌러 화면 녹화를 시작하세요',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 48),
+            
+            // Record Button
+            GestureDetector(
+              onTap: () {
+                if (recordingState.status == RecordingStatus.recording) {
+                  recordingNotifier.stopRecording();
+                } else {
+                  recordingNotifier.startRecording();
+                }
+              },
+              child: Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  color: recordingState.status == RecordingStatus.recording 
+                      ? Colors.red 
+                      : AppTheme.accentOrange,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: (recordingState.status == RecordingStatus.recording 
+                          ? Colors.red 
+                          : AppTheme.accentOrange).withOpacity(0.4),
+                      blurRadius: 30,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  recordingState.status == RecordingStatus.recording 
+                      ? Icons.stop 
+                      : Icons.fiber_manual_record,
+                  size: 60,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 48),
+            
+            // Bottom Actions
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildActionButton(Icons.settings, '설정'),
+                _buildActionButton(Icons.history, '갤러리'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
+    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
+    return "$twoDigitMinutes:$twoDigitSeconds";
+  }
+
+  Widget _buildActionButton(IconData icon, String label) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.glassWhite,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(icon, color: Colors.white),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 14),
+        ),
+      ],
+    );
+  }
+}
