@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screen_recording/flutter_screen_recording.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:smartphone_recorder/presentation/providers/gallery_provider.dart';
 
 enum RecordingStatus { idle, recording, paused, success, failure }
 
@@ -93,19 +94,19 @@ class RecordingNotifier extends Notifier<RecordingState> {
         return;
       }
 
-      Directory? tempDir = await getExternalStorageDirectory();
-      String path = '${tempDir!.path}/recording_${DateTime.now().millisecondsSinceEpoch}.mp4';
-      print('Recording path: $path');
-
       print('Calling FlutterScreenRecording.startRecordScreenAndAudio...');
-      bool started = await FlutterScreenRecording.startRecordScreenAndAudio(path);
-      print('Recording started: $started');
+      // Note: The plugin (flutter_screen_recording) ignores the path parameter
+      // and always saves to externalCacheDir or cacheDir with the given name.
+      // We just pass a simple filename (no full path, no extension).
+      final videoName = 'rec_${DateTime.now().millisecondsSinceEpoch}';
+      bool started = await FlutterScreenRecording.startRecordScreenAndAudio(videoName);
+      print('FlutterScreenRecording result: $started');
       
       if (started) {
+        print('Recording engine started.');
         state = state.copyWith(status: RecordingStatus.recording, duration: Duration.zero);
         _startTimer();
         
-        // Show overlay
         await FlutterOverlayWindow.showOverlay(
           enableDrag: true,
           flag: OverlayFlag.defaultFlag,
@@ -113,6 +114,7 @@ class RecordingNotifier extends Notifier<RecordingState> {
         );
       }
     } catch (e) {
+      print('CRITICAL ERROR in startRecording: $e');
       state = state.copyWith(
         status: RecordingStatus.failure,
         errorMessage: e.toString(),
@@ -121,20 +123,52 @@ class RecordingNotifier extends Notifier<RecordingState> {
   }
 
   Future<void> stopRecording() async {
+    print('Stop recording requested...');
     try {
+      // stopRecordScreen returns the actual full path where the plugin saved the file
       String path = await FlutterScreenRecording.stopRecordScreen;
+      print('Plugin returned path: $path');
       _stopTimer();
-      
-      state = state.copyWith(
-        status: RecordingStatus.success,
-        filePath: path,
-      );
-      
+
+      final File file = File(path);
+      final bool exists = await file.exists();
+      final int size = exists ? await file.length() : 0;
+      print('File exists: $exists, size: $size bytes');
+
+      if (!exists || size == 0) {
+        print('WARNING: File not found or empty at: $path');
+        state = state.copyWith(
+          status: RecordingStatus.failure,
+          errorMessage: '녹화 파일이 생성되지 않았습니다. (경로: $path)',
+        );
+        return;
+      }
+
+      state = state.copyWith(status: RecordingStatus.success, filePath: path);
+
+      // Save to system gallery using native platform channel (most reliable)
+      try {
+        const channel = MethodChannel('com.smartrecorder/gallery');
+        final savedPath = await channel.invokeMethod<String>(
+          'saveToGallery',
+          {'filePath': path},
+        );
+        print('Saved to system gallery successfully! Path: $savedPath');
+      } on PlatformException catch (e) {
+        print('Platform channel gallery save failed: ${e.code} / ${e.message}');
+      } catch (e) {
+        print('Unknown gallery save error: $e');
+      }
+
       // Close overlay
       if (await FlutterOverlayWindow.isActive()) {
         await FlutterOverlayWindow.closeOverlay();
       }
+
+      // Refresh our in-app gallery
+      ref.read(galleryProvider.notifier).refresh();
     } catch (e) {
+      print('CRITICAL ERROR in stopRecording: $e');
       state = state.copyWith(
         status: RecordingStatus.failure,
         errorMessage: e.toString(),

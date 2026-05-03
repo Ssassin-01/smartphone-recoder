@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smartphone_recorder/core/app_theme.dart';
 import 'package:smartphone_recorder/presentation/providers/recording_provider.dart';
+import 'package:smartphone_recorder/presentation/screens/gallery_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -10,6 +11,25 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final recordingState = ref.watch(recordingProvider);
     final recordingNotifier = ref.read(recordingProvider.notifier);
+
+    // Listen for status changes to show SnackBars
+    ref.listen(recordingProvider, (previous, next) {
+      if (next.status == RecordingStatus.success && next.filePath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('녹화 완료! 저장 위치: ${next.filePath!.split('/').last}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (next.status == RecordingStatus.failure) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('오류: ${next.errorMessage}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -111,8 +131,13 @@ class HomeScreen extends ConsumerWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _buildActionButton(Icons.settings, '설정'),
-                _buildActionButton(Icons.history, '갤러리'),
+                _buildActionButton(Icons.settings, '설정', () {}),
+                _buildActionButton(Icons.history, '갤러리', () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const GalleryScreen()),
+                  );
+                }),
               ],
             ),
           ],
@@ -128,23 +153,26 @@ class HomeScreen extends ConsumerWidget {
     return "$twoDigitMinutes:$twoDigitSeconds";
   }
 
-  Widget _buildActionButton(IconData icon, String label) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppTheme.glassWhite,
-            borderRadius: BorderRadius.circular(16),
+  Widget _buildActionButton(IconData icon, String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.glassWhite,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, color: Colors.white),
           ),
-          child: Icon(icon, color: Colors.white),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 14),
-        ),
-      ],
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 14),
+          ),
+        ],
+      ),
     );
   }
 }
