@@ -67,8 +67,17 @@ class _VideoThumbnail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!file.existsSync()) {
+      return const SizedBox.shrink(); // 파일이 없으면 그리지 않음
+    }
+
     final fileName = file.path.split('/').last;
-    final date = file.lastModifiedSync();
+    DateTime date;
+    try {
+      date = file.lastModifiedSync();
+    } catch (e) {
+      date = DateTime.now(); // 실패 시 현재 시간으로 대체
+    }
     
     return GestureDetector(
       onTap: () {
@@ -100,25 +109,69 @@ class _VideoThumbnail extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Text(
-                    fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          fileName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${date.year}.${date.month}.${date.day} ${date.hour}:${date.minute}',
+                          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${date.year}.${date.month}.${date.day} ${date.hour}:${date.minute}',
-                    style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10),
+                  Consumer(
+                    builder: (context, ref, child) {
+                      return IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                        onPressed: () => _showDeleteDialog(context, ref, file),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      );
+                    },
                   ),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context, WidgetRef ref, File file) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.primaryNavy,
+        title: const Text('영상 삭제', style: TextStyle(color: Colors.white)),
+        content: const Text('이 영상을 삭제하시겠습니까?\n시스템 갤러리에서도 사라집니다.', 
+                           style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소', style: TextStyle(color: Colors.white60)),
+          ),
+          TextButton(
+            onPressed: () {
+              ref.read(galleryProvider.notifier).deleteFile(file);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('영상이 삭제되었습니다.')),
+              );
+            },
+            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
       ),
     );
   }
@@ -165,6 +218,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               Share.shareXFiles([XFile(widget.file.path)]);
             },
           ),
+          Consumer(
+            builder: (context, ref, child) {
+              return IconButton(
+                icon: const Icon(Icons.delete),
+                onPressed: () {
+                  _showDeleteDialog(context, ref, widget.file);
+                },
+              );
+            },
+          ),
         ],
       ),
       body: Center(
@@ -181,6 +244,35 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 ),
               )
             : const CircularProgressIndicator(),
+      ),
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context, WidgetRef ref, File file) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.primaryNavy,
+        title: const Text('영상 삭제', style: TextStyle(color: Colors.white)),
+        content: const Text('이 영상을 삭제하시겠습니까?\n시스템 갤러리에서도 사라집니다.', 
+                           style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('취소', style: TextStyle(color: Colors.white60)),
+          ),
+          TextButton(
+            onPressed: () {
+              ref.read(galleryProvider.notifier).deleteFile(file);
+              Navigator.pop(context); // 팝업 닫기
+              Navigator.pop(context); // 재생 화면 닫기
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('영상이 삭제되었습니다.')),
+              );
+            },
+            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
       ),
     );
   }

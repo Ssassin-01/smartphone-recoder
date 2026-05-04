@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -27,6 +28,8 @@ class GalleryNotifier extends Notifier<AsyncValue<List<File>>> {
           externalStorage.path.replaceAll('/files', '/cache'),
         // cacheDir 패턴: /data/user/0/[패키지명]/cache
         (await getTemporaryDirectory()).path,
+        // 시스템 갤러리 경로 추가 (DCIM/SmartRecorder)
+        '/storage/emulated/0/DCIM/SmartRecorder',
         // 혹시 모를 app_flutter 경로
         (await getApplicationDocumentsDirectory()).path,
       ];
@@ -44,7 +47,13 @@ class GalleryNotifier extends Notifier<AsyncValue<List<File>>> {
 
         final List<File> mp4s = entities
             .whereType<File>()
-            .where((file) => file.path.toLowerCase().endsWith('.mp4'))
+            .where((file) {
+              try {
+                return file.path.toLowerCase().endsWith('.mp4') && file.existsSync();
+              } catch (_) {
+                return false;
+              }
+            })
             .toList();
 
         print('  -> Found ${mp4s.length} mp4 files.');
@@ -65,12 +74,20 @@ class GalleryNotifier extends Notifier<AsyncValue<List<File>>> {
 
   Future<void> deleteFile(File file) async {
     try {
-      if (await file.exists()) {
-        await file.delete();
-        refresh();
-      }
+      // 네이티브 채널로 파일 삭제 + MediaStore 동기화
+      const channel = MethodChannel('com.smartrecorder/gallery');
+      await channel.invokeMethod('deleteFromGallery', {'filePath': file.path});
+      print('Deleted from gallery and MediaStore: ${file.path}');
+      refresh();
     } catch (e) {
-      print('Error deleting file: $e');
+      // 네이티브 삭제 실패 시 직접 파일 삭제 시도
+      print('Native delete failed, trying direct delete: $e');
+      try {
+        if (await file.exists()) await file.delete();
+        refresh();
+      } catch (e2) {
+        print('Error deleting file: $e2');
+      }
     }
   }
 }

@@ -19,20 +19,40 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "saveToGallery") {
-                val filePath = call.argument<String>("filePath")
-                if (filePath == null) {
-                    result.error("INVALID_ARGS", "filePath is null", null)
-                    return@setMethodCallHandler
+            when (call.method) {
+                "saveToGallery" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath == null) {
+                        result.error("INVALID_ARGS", "filePath is null", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val savedPath = saveVideoToGallery(filePath)
+                        result.success(savedPath)
+                    } catch (e: Exception) {
+                        result.error("SAVE_FAILED", e.message, null)
+                    }
                 }
-                try {
-                    val savedPath = saveVideoToGallery(filePath)
-                    result.success(savedPath)
-                } catch (e: Exception) {
-                    result.error("SAVE_FAILED", e.message, null)
+                "minimizeApp" -> {
+                    moveTaskToBack(true)
+                    result.success(true)
                 }
-            } else {
-                result.notImplemented()
+                "deleteFromGallery" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath == null) {
+                        result.error("INVALID_ARGS", "filePath is null", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        deleteVideoFromGallery(filePath)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("DELETE_FAILED", e.message, null)
+                    }
+                }
+                else -> {
+                    result.notImplemented()
+                }
             }
         }
     }
@@ -87,6 +107,53 @@ class MainActivity : FlutterActivity() {
             )
 
             targetFile.absolutePath
+        }
+    }
+
+    private fun deleteVideoFromGallery(filePath: String) {
+        val file = File(filePath)
+        val resolver = contentResolver
+        val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+
+        // MediaStore에서 파일 경로로 항목을 찾아 content URI를 얻은 뒤 삭제
+        var deletedFromMediaStore = false
+        try {
+            val projection = arrayOf(MediaStore.Video.Media._ID)
+            val selection = "${MediaStore.Video.Media.DATA} = ?"
+            val selectionArgs = arrayOf(filePath)
+
+            resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID))
+                    val contentUri = android.net.Uri.withAppendedPath(collection, id.toString())
+                    val count = resolver.delete(contentUri, null, null)
+                    println("Deleted via content URI: $count row(s) for id=$id")
+                    deletedFromMediaStore = count > 0
+                }
+            }
+        } catch (e: Exception) {
+            println("MediaStore query/delete error: ${e.message}")
+        }
+
+        // MediaStore에서 못 찾았거나 Android 9 이하면 DISPLAY_NAME으로도 시도
+        if (!deletedFromMediaStore) {
+            val count = resolver.delete(
+                collection,
+                "${MediaStore.Video.Media.DISPLAY_NAME} = ?",
+                arrayOf(file.name)
+            )
+            println("Fallback DISPLAY_NAME delete: $count row(s) for ${file.name}")
+        }
+
+        // 실제 파일 삭제
+        if (file.exists()) {
+            file.delete()
+            println("Physical file deleted: $filePath")
+        }
+
+        // Android 9 이하: 미디어 스캔으로 갤러리 갱신
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            MediaScannerConnection.scanFile(applicationContext, arrayOf(filePath), arrayOf("video/mp4"), null)
         }
     }
 }
