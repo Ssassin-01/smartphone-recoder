@@ -14,10 +14,18 @@ void main() {
 
 @pragma("vm:entry-point")
 void overlayMain() {
+  print('🔵 [overlayMain] Flutter 오버레이 엔진 시작!');
   runApp(
-    const MaterialApp(
+    MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: OverlayWidget(),
+      theme: ThemeData(
+        scaffoldBackgroundColor: Colors.transparent,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.orange,
+          surface: Colors.transparent,
+        ),
+      ),
+      home: const OverlayWidget(),
     ),
   );
 }

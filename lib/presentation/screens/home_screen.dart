@@ -1,14 +1,64 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smartphone_recorder/core/app_theme.dart';
 import 'package:smartphone_recorder/presentation/providers/recording_provider.dart';
 import 'package:smartphone_recorder/presentation/screens/gallery_screen.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObserver {
+  bool _isShowingOverlay = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) await _checkPermissionAndShowBall();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkPermissionAndShowBall();
+    }
+  }
+
+  Future<void> _checkPermissionAndShowBall() async {
+    if (_isShowingOverlay) return; // 중복 호출 방지
+    _isShowingOverlay = true;
+    try {
+      final hasPermission = await FlutterOverlayWindow.isPermissionGranted();
+      if (hasPermission) {
+        // 권한이 있다면 즉시 오버레이 실행 (showOverlay 내부의 재시작 로직 활용)
+        await ref.read(recordingProvider.notifier).showOverlay();
+      } else {
+        // 권한이 없으면 요청 (설정 화면으로 이동)
+        await FlutterOverlayWindow.requestPermission();
+      }
+    } catch (e) {
+      print('🔴 [Overlay] 초기화 오류: $e');
+    } finally {
+      _isShowingOverlay = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final recordingState = ref.watch(recordingProvider);
     final recordingNotifier = ref.read(recordingProvider.notifier);
 
@@ -142,7 +192,9 @@ class HomeScreen extends ConsumerWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _buildActionButton(Icons.settings, '설정', () {}),
+                  _buildActionButton(Icons.settings, '설정', () async {
+                    await recordingNotifier.requestOverlayPermission();
+                  }),
                   _buildActionButton(Icons.history, '갤러리', () {
                     Navigator.push(
                       context,

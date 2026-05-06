@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_screen_recording/flutter_screen_recording.dart';
@@ -52,9 +53,18 @@ class RecordingNotifier extends Notifier<RecordingState> {
   RecordingState build() {
     _initOverlayListener();
     _initShakeDetector();
+
+    // 앱 생명주기 감시 (강제 종료 대응)
+    final observer = _AppLifecycleObserver(onDetached: () {
+      if (state.status == RecordingStatus.recording) {
+        stopRecording();
+      }
+    });
+    WidgetsBinding.instance.addObserver(observer);
     
     // Clean up when provider is disposed
     ref.onDispose(() {
+      WidgetsBinding.instance.removeObserver(observer);
       _timer?.cancel();
       _countdownTimer?.cancel();
       _shakeDetector?.stopListening();
@@ -76,9 +86,11 @@ class RecordingNotifier extends Notifier<RecordingState> {
   }
 
   void _initOverlayListener() {
-    FlutterOverlayWindow.overlayListener.listen((event) {
-      if (event == 'stop') {
+    FlutterOverlayWindow.overlayListener.listen((data) {
+      if (data == 'stop') {
         stopRecording();
+      } else if (data == 'start') {
+        startRecording();
       }
     });
   }
@@ -99,6 +111,14 @@ class RecordingNotifier extends Notifier<RecordingState> {
   }
 
   Future<void> startRecording() async {
+    // 오버레이 권한 체크: 없으면 설정 화면으로 보냄
+    if (!await FlutterOverlayWindow.isPermissionGranted()) {
+      await FlutterOverlayWindow.requestPermission();
+      return;
+    }
+
+    if (state.status == RecordingStatus.recording) return;
+
     print('Starting recording process...');
     try {
       final hasPermission = await requestPermissions();
@@ -150,12 +170,38 @@ class RecordingNotifier extends Notifier<RecordingState> {
     }
   }
 
+  Future<void> showOverlay() async {
+    try {
+      if (await FlutterOverlayWindow.isActive()) {
+        print('🟠 [Overlay] 기존 오버레이 종료 후 재시작...');
+        await FlutterOverlayWindow.closeOverlay();
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+
+      final view = WidgetsBinding.instance.platformDispatcher.views.first;
+      final dpr = view.devicePixelRatio;
+      const int windowDp = 60;
+
+      await FlutterOverlayWindow.showOverlay(
+        enableDrag: true, // 안드로이드 네이티브 드래그 위임
+        overlayTitle: "Smart Recorder",
+        overlayContent: "녹화 준비 완료",
+        width: windowDp,
+        height: windowDp,
+        alignment: OverlayAlignment.topLeft, // 좌상단 기준 좌표계 사용
+        positionGravity: PositionGravity.auto, // 손 뗄 때 좌/우 엣지로 자동 스냅!
+        visibility: NotificationVisibility.visibilityPublic,
+        flag: OverlayFlag.defaultFlag,
+      );
+      print('🟠 [Overlay] 오버레이 표시 완료!');
+    } catch (e) {
+      print('🔴 [Overlay] showOverlay 오류: $e');
+    }
+  }
+
   Future<void> _executeStartRecording() async {
     try {
       print('Calling FlutterScreenRecording.startRecordScreenAndAudio...');
-      // Note: The plugin (flutter_screen_recording) ignores the path parameter
-      // and always saves to externalCacheDir or cacheDir with the given name.
-      // We just pass a simple filename (no full path, no extension).
       final videoName = 'rec_${DateTime.now().millisecondsSinceEpoch}';
       bool started = await FlutterScreenRecording.startRecordScreenAndAudio(videoName);
       print('FlutterScreenRecording result: $started');
@@ -164,12 +210,7 @@ class RecordingNotifier extends Notifier<RecordingState> {
         print('Recording engine started.');
         state = state.copyWith(status: RecordingStatus.recording, duration: Duration.zero);
         _startTimer();
-        
-        await FlutterOverlayWindow.showOverlay(
-          enableDrag: true,
-          flag: OverlayFlag.defaultFlag,
-          alignment: OverlayAlignment.centerRight,
-        );
+        await showOverlay();
       } else {
         state = state.copyWith(
           status: RecordingStatus.failure,
@@ -188,10 +229,14 @@ class RecordingNotifier extends Notifier<RecordingState> {
   Future<void> stopRecording() async {
     print('Stop recording requested...');
     try {
-      // stopRecordScreen returns the actual full path where the plugin saved the file
       String path = await FlutterScreenRecording.stopRecordScreen;
       print('Plugin returned path: $path');
       _stopTimer();
+      
+      // 오버레이 종료
+      if (await FlutterOverlayWindow.isActive()) {
+        await FlutterOverlayWindow.closeOverlay();
+      }
 
       final File file = File(path);
       final bool exists = await file.exists();
@@ -248,16 +293,43 @@ class RecordingNotifier extends Notifier<RecordingState> {
   void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      state = state.copyWith(duration: state.duration + const Duration(seconds: 1));
+      final newDuration = state.duration + const Duration(seconds: 1);
+      state = state.copyWith(duration: newDuration);
+      
+      // 오버레이로 실시간 데이터 전송
+      final minutes = newDuration.inMinutes.toString().padLeft(2, '0');
+      final seconds = (newDuration.inSeconds % 60).toString().padLeft(2, '0');
+      FlutterOverlayWindow.shareData({
+        'status': 'recording',
+        'duration': '$minutes:$seconds',
+      });
     });
   }
 
   void _stopTimer() {
     _timer?.cancel();
     _timer = null;
+    
+    // 오버레이 상태 초기화 전송
+    FlutterOverlayWindow.shareData({
+      'status': 'idle',
+      'duration': '00:00',
+    });
   }
 }
 
 final recordingProvider = NotifierProvider<RecordingNotifier, RecordingState>(() {
   return RecordingNotifier();
 });
+
+class _AppLifecycleObserver extends WidgetsBindingObserver {
+  final VoidCallback onDetached;
+  _AppLifecycleObserver({required this.onDetached});
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      onDetached();
+    }
+  }
+}
